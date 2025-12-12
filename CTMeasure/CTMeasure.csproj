@@ -120,8 +120,9 @@
     <Reference Include="SimpleTCP, Version=1.0.24.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\SimpleTCP.1.0.24\lib\net45\SimpleTCP.dll</HintPath>
     </Reference>
-    <Reference Include="SpinnakerNET_v140">
-      <HintPath>..\..\..\..\..\..\Program Files\FLIR Systems\Spinnaker\bin64\vs2015\SpinnakerNET_v140.dll</HintPath>
+    <Reference Include="SpinnakerNET_v140, Version=3.2.0.62, Culture=neutral, PublicKeyToken=e3ed2bf1f221d241, processorArchitecture=AMD64">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\DLL\SpinnakerNET_v140.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">

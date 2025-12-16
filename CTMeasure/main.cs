@@ -565,6 +565,7 @@ namespace CTMeasure
         private string[] tokens;
         private string clinetInfo;
         public static SimpleTCP.Message lastClient; // 最後に受信したクライアント情報
+        public static string[] CurrentTokens; // Public access to tokens
 
         // サーバー起動
         private void ConnectUnityButton_Click(object sender, EventArgs e)
@@ -615,7 +616,9 @@ namespace CTMeasure
                         Invoke((MethodInvoker)(() =>
                         {
                             //MessageBox.Show($"Unityから受信: {received}");
+                            //MessageBox.Show($"Unityから受信: {received}");
                             tokens = received.Split(new char[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+                            CurrentTokens = tokens; // Update static ref
 
                             // 「Hello」受信時に「request」送信
                             if (tokens.Length > 0 && tokens[0].StartsWith("Hello"))

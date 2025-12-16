@@ -87,7 +87,7 @@ namespace CTMeasure
             LuminanceChart.AxisX.Add(new Axis
             {
                 Title = "Step (mm)",
-                FontSize = 16,
+                FontSize = 12,
                 LabelFormatter = value => $"{value:F0}",
                 MinValue = 0,
                 MaxValue = steps,
@@ -100,7 +100,7 @@ namespace CTMeasure
             LuminanceChart.AxisY.Add(new Axis
             {
                 Title = "Luminance (gray scale level)",
-                FontSize = 16,
+                FontSize = 12,
                 LabelFormatter = value => $"{value:F2}",
                 MinValue = 0,
                 MaxValue = 255,
@@ -122,7 +122,7 @@ namespace CTMeasure
             CrosstalkChart.AxisX.Add(new Axis
             {
                 Title = "Step (mm)",
-                FontSize = 16,
+                FontSize = 12,
                 LabelFormatter = value => $"{value:F0}",
                 MinValue = 0,
                 MaxValue = steps,
@@ -135,7 +135,7 @@ namespace CTMeasure
             CrosstalkChart.AxisY.Add(new Axis
             {
                 Title = "Cross Talk Ratio (%)",
-                FontSize = 16,
+                FontSize = 12,
                 LabelFormatter = value => $"{value:F2}",
                 MinValue = 0,
                 MaxValue = 100,
@@ -151,6 +151,35 @@ namespace CTMeasure
             CrosstalkChart.Zoom = ZoomingOptions.Xy;
 
             ctr = new CalkCrossTalk();
+
+            // --- 輝度標準偏差分布 (Luminance_std) ---
+            // 輝度標準偏差分布管理のためのオブジェクトを生成
+            Luminance_std.Series = new SeriesCollection();
+            // XY軸設定
+            Luminance_std.AxisX.Add(new Axis
+            {
+                Title = "Δθ(deg)",
+                FontSize = 12,
+                LabelFormatter = value => $"{value:F1}",
+                Separator = new Separator { StrokeThickness = 1, Step = 1 } 
+            });
+            Luminance_std.AxisY.Add(new Axis
+            {
+                Title = "Lum Std Dev (-)",
+                FontSize = 12,
+                LabelFormatter = value => $"{value:F4}",
+                MinValue = 0,
+                Separator = new Separator { StrokeThickness = 1 } // Auto step
+            });
+            // 凡例の位置を設定
+            Luminance_std.LegendLocation = LegendLocation.Right;
+            // 拡大・縮小を許可
+            Luminance_std.Zoom = ZoomingOptions.Xy;
+
+            // ErrRange変更時に軸を更新
+            ErrRange.SelectedIndexChanged += ErrRange_SelectedIndexChanged;
+            // 初期状態の反映
+            if (ErrRange.Items.Count > 0) ErrRange.SelectedIndex = 4; // Default to ±5° if available
         }
 
         // X軸値更新
@@ -170,6 +199,31 @@ namespace CTMeasure
         private void StepRange_TextChanged(object sender, EventArgs e)
         {
             UpdateChartXAxis();
+        }
+
+        // ErrRange変更時の処理
+        private void ErrRange_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            UpdateLuminanceStdChartXAxis();
+        }
+
+        // Luminance_stdのX軸更新
+        private void UpdateLuminanceStdChartXAxis()
+        {
+            if (Luminance_std.AxisX.Count == 0) return;
+
+            // "±5°" のような文字列から数値を抽出
+            string text = ErrRange.SelectedItem?.ToString();
+            if (string.IsNullOrEmpty(text)) return;
+
+            // "±" や "°" を除去
+            text = text.Replace("±", "").Replace("°", "");
+            
+            if (double.TryParse(text, out double rangeVal))
+            {
+                Luminance_std.AxisX[0].MinValue = -rangeVal;
+                Luminance_std.AxisX[0].MaxValue = rangeVal;
+            }
         }
 
         // 開始地点のROI選択
@@ -232,8 +286,6 @@ namespace CTMeasure
         {
             double widthRatio = (double)maxWidth / originalWidth;
             double heightRatio = (double)maxHeight / originalHeight;
-
-
 
             // 縦横のうち、より縮小率が高い方（または拡大率が低い方）を基準とする
             double ratio = Math.Min(widthRatio, heightRatio);
@@ -704,7 +756,7 @@ namespace CTMeasure
         }
 
         // ----------------------------------------
-        // 　　　　　クロストーク比測定
+        // 　　　　　クロストーク測定
         // ----------------------------------------
         // クロストーク比分布測定スタート
         private async void Crosstalk_Start_Click(object sender, EventArgs e)
@@ -1215,6 +1267,178 @@ namespace CTMeasure
             }
         }
 
+        // ----------------------------------------
+        //         輝度標準偏差 (Luminance Std)
+        // ----------------------------------------
+        private async void LumStd_Start_Click(object sender, EventArgs e)
+        {
+            if (_isMeasuring) { MessageBox.Show("別の測定が実行中です。"); return; }
 
+            // 前提Check
+            if (CameraRef == null || CameraRef.LatestFrame == null)
+            {
+                MessageBox.Show("カメラ画像が取得できません", "エラー");
+                return;
+            }
+            if (Start_roiCorners == null)
+            {
+                MessageBox.Show("ROIを設定してください(Start ROIを使用します)", "エラー");
+                return;
+            }
+            // TCP Check
+            if (CrossTalkMeasure.lastClient == null)
+            {
+                MessageBox.Show("Unityクライアントと接続されていません", "エラー");
+                return;
+            }
+
+            _isMeasuring = true;
+            _measureCts = new CancellationTokenSource();
+            var token = _measureCts.Token;
+
+            // UIロック
+            StopMeasure.Enabled = true;
+            LumStd_Start.Enabled = false;
+
+            // 保存先ディレクトリ作成
+            string saveDir = Path.Combine(Application.StartupPath, "Luminance_Std_Data", DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+            Directory.CreateDirectory(saveDir);
+
+            try
+            {
+                // チャート準備
+                var values = new ChartValues<LiveCharts.Defaults.ObservablePoint>();
+                var series = new LineSeries
+                {
+                    Title = "StdDev " + DateTime.Now.ToString("HH:mm:ss"),
+                    Values = values,
+                    PointGeometry = DefaultGeometries.Circle,
+                    PointGeometrySize = 6,
+                    Fill = Brushes.Transparent
+                };
+                Luminance_std.Series.Add(series);
+
+                double minAngle = Luminance_std.AxisX[0].MinValue;
+                double maxAngle = Luminance_std.AxisX[0].MaxValue;
+                
+                double stepDeg = 1.0;
+                string stepText = ErrStep.Text;
+                if (!double.TryParse(stepText, out stepDeg)) stepDeg = 1.0;
+                if (stepDeg <= 0) stepDeg = 1.0;
+
+                // ループ回数
+                // 浮動小数点誤差を考慮して少し余裕を持たせる
+                int steps = (int)((maxAngle - minAngle) / stepDeg + 0.0001) + 1;
+
+                // 直近の受信トークンを取得
+                string[] tokens = CrossTalkMeasure.CurrentTokens;
+                if (tokens == null || tokens.Length < 21)
+                {
+                    MessageBox.Show("Unityからのパラメータ情報が不足しています(CurrentTokens null or few elements)", "エラー");
+                    return;
+                }
+                
+                // tokensのコピーを作成して操作
+                List<string> tokenList = new List<string>(tokens);
+                
+                // dTheta は index 21 と推定 (tokens[0]="current", ..., tokens[21]=dTheta)
+                // もし不足していれば追加、あれば置換
+                // 通常 "current/Lx.../OnDotInt/dTheta/Toggle" のはず
+                // dThetaがindex 21
+                while (tokenList.Count <= 21) tokenList.Add("0");
+                
+                for (int i = 0; i < steps; i++)
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    double currentAngle = minAngle + i * stepDeg;
+                    if (currentAngle > maxAngle + 0.0001) break;
+
+                    // --- 3. TCP送信 (dTheta更新) ---
+                    tokenList[21] = currentAngle.ToString("F5"); // 角度パラメータ更新
+                    
+                    // Toggleが最後にある場合 (index 22)
+                    // オリジナルがToggleまで持っていればそれを使う、なければ"0"
+                    if (tokenList.Count <= 22) tokenList.Add("0");
+                    
+                    // メッセージ再構築
+                    string message = string.Join("/", tokenList);
+                    // 行末改行をつける
+                    if (!message.EndsWith("\n")) message += "\n";
+
+                    CrossTalkMeasure.lastClient.ReplyLine(message);
+                    Console.WriteLine($"Sent: dTheta={currentAngle:F5}");
+
+                    // --- 4. 待機 ---
+                    await Task.Delay(2000, token); // 2秒待機
+
+                    // --- 5. 画像取得・保存 ---
+                    int minX = Start_roiCorners.Min(p => p.X);
+                    int minY = Start_roiCorners.Min(p => p.Y);
+                    int maxX = Start_roiCorners.Max(p => p.X);
+                    int maxY = Start_roiCorners.Max(p => p.Y);
+                    Rect roi = new Rect(minX, minY, maxX - minX, maxY - minY);
+
+                    Mat frame = CameraRef.LatestFrame.Clone();
+                    // Clip ROI
+                    roi = roi.Intersect(new Rect(0, 0, frame.Width, frame.Height));
+                    Mat roiMat = new Mat(frame, roi);
+
+                    // 保存
+                    string filename = $"img_theta_{currentAngle:F5}.png";
+                    string savePath = Path.Combine(saveDir, filename);
+                    Cv2.ImWrite(savePath, roiMat);
+
+                    // --- 6. 計算・プロット ---
+                    double stdVal = CalculateLuminanceStd(roiMat);
+                    values.Add(new LiveCharts.Defaults.ObservablePoint(currentAngle, stdVal));
+
+                    // (Optional) 確認用表示
+                    Cv2.ImShow("StdDev ROI", roiMat);
+                    Cv2.WaitKey(1);
+                }
+
+                MessageBox.Show($"測定完了しました。\n保存先: {saveDir}", "完了");
+            }
+            catch (TaskCanceledException)
+            {
+                MessageBox.Show("中断しました", "中断");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"エラー発生: {ex.Message}", "エラー");
+            }
+            finally
+            {
+                _isMeasuring = false;
+                StopMeasure.Enabled = false;
+                LumStd_Start.Enabled = true;
+                _measureCts?.Dispose();
+                _measureCts = null;
+                Cv2.DestroyWindow("StdDev ROI");
+            }
+        }
+
+        // im2double相当を実施して標準偏差を計算
+        private double CalculateLuminanceStd(Mat src)
+        {
+            using (Mat gray = new Mat())
+            using (Mat doubleMat = new Mat())
+            {
+                // グレースケール変換
+                if (src.Channels() == 3)
+                    Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+                else
+                    src.CopyTo(gray);
+
+                // CV_64F (double) に変換し、0.0-1.0に正規化 (im2double相当)
+                gray.ConvertTo(doubleMat, MatType.CV_64F, 1.0 / 255.0);
+
+                // 平均と標準偏差を計算
+                Cv2.MeanStdDev(doubleMat, out Scalar mean, out Scalar stdDev);
+
+                return stdDev.Val0;
+            }
+        }
     }
 }

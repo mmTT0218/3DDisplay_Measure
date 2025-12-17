@@ -583,6 +583,7 @@
             this.Std_Save.TabIndex = 49;
             this.Std_Save.Text = "Save";
             this.Std_Save.UseVisualStyleBackColor = true;
+            this.Std_Save.Click += new System.EventHandler(this.Std_Save_Click);
             // 
             // LumStd_Start
             // 

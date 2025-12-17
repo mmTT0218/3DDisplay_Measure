@@ -75,6 +75,8 @@ namespace CTMeasure
         // グラフタイトルをキーにした ChartValues 管理辞書
         private Dictionary<string, ChartValues<double>> dataSeriesDict_lum = new Dictionary<string, ChartValues<double>>();
         private Dictionary<string, ChartValues<double>> dataSeriesDict_ctr = new Dictionary<string, ChartValues<double>>();
+        // Luminance Std用の辞書追加
+        private Dictionary<string, ChartValues<LiveCharts.Defaults.ObservablePoint>> dataSeriesDict_lumStd = new Dictionary<string, ChartValues<LiveCharts.Defaults.ObservablePoint>>();
 
         public CrosstalkEvaluation(double steps)
         {
@@ -180,6 +182,8 @@ namespace CTMeasure
             ErrRange.SelectedIndexChanged += ErrRange_SelectedIndexChanged;
             // 初期状態の反映
             if (ErrRange.Items.Count > 0) ErrRange.SelectedIndex = 4; // Default to ±5° if available
+            // イベント購読
+            Std_Save.Click += Std_Save_Click;
         }
 
         // X軸値更新
@@ -1216,57 +1220,6 @@ namespace CTMeasure
             }
         }
 
-        // ---------------------------------------
-        //               その他機能
-        // ---------------------------------------
-        // Eyetracking 測定機能ON/OFF
-        private void Eyetracking_Click(object sender, EventArgs e)
-        {
-            if (EyeTrack == false)
-            {
-                EyeTrack = true;
-                Eyetracking.BackgroundImage = Properties.Resources.EyetrackingOFF;
-            }
-            else
-            {
-                EyeTrack = false;
-                Eyetracking.BackgroundImage = Properties.Resources.EyetrackingON;
-            }
-        }
-        // カメラ移動方向指定ボタン
-        // 水平
-        private void CameraMove_H_Click(object sender, EventArgs e)
-        {
-            if (Horizontal == false)
-            {
-                Horizontal = true;
-                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingON_Horizontal;
-                Depth = false;
-                CameraMove_D.BackgroundImage = Properties.Resources.CameraTrackingOFF_Depth;
-            }
-            else
-            {
-                Horizontal = false;
-                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Horizontal;
-            }
-        }
-        // 奥行
-        private void CameraMove_D_Click(object sender, EventArgs e)
-        {
-            if (Depth == false)
-            {
-                Depth = true;
-                CameraMove_D.BackgroundImage = Properties.Resources.CameraTrackingON_Depth;
-                Horizontal = false;
-                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Horizontal;
-            }
-            else
-            {
-                Depth = false;
-                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Depth;
-            }
-        }
-
         // ----------------------------------------
         //         輝度標準偏差 (Luminance Std)
         // ----------------------------------------
@@ -1317,6 +1270,9 @@ namespace CTMeasure
                     Fill = Brushes.Transparent
                 };
                 Luminance_std.Series.Add(series);
+                
+                // データ保存用に辞書に追加
+                dataSeriesDict_lumStd[series.Title] = values;
 
                 double minAngle = Luminance_std.AxisX[0].MinValue;
                 double maxAngle = Luminance_std.AxisX[0].MaxValue;
@@ -1390,7 +1346,9 @@ namespace CTMeasure
                     Mat roiMat = new Mat(frame, roi);
 
                     // 保存
-                    string filename = $"img_theta_{currentAngle:F5}.png";
+                    // ffmpeg等で動画化しやすいよう、連番(0埋め)を付与
+                    // format: img_0000_theta_-5.00000.png
+                    string filename = $"img_{i:D4}_theta_{currentAngle:F5}.png";
                     string savePath = Path.Combine(saveDir, filename);
                     Cv2.ImWrite(savePath, roiMat);
 
@@ -1420,7 +1378,7 @@ namespace CTMeasure
                 LumStd_Start.Enabled = true;
                 _measureCts?.Dispose();
                 _measureCts = null;
-                Cv2.DestroyWindow("StdDev ROI");
+                // Cv2.DestroyWindow("StdDev ROI");
             }
         }
 
@@ -1443,6 +1401,199 @@ namespace CTMeasure
                 Cv2.MeanStdDev(doubleMat, out Scalar mean, out Scalar stdDev);
 
                 return stdDev.Val0;
+            }
+        }
+
+        // グラフ保存 (Luminance Std)
+        private void Std_Save_Click(object sender, EventArgs e)
+        {
+            if (dataSeriesDict_lumStd == null || dataSeriesDict_lumStd.Count == 0)
+            {
+                MessageBox.Show("保存する測定データがありません。", "エラー");
+                return;
+            }
+
+            using (var dlg = new SaveForm())
+            {
+                var result = dlg.ShowDialog();
+
+                if (result == DialogResult.OK)
+                {
+                    SaveCSV_Std();
+                }
+                else if (result == DialogResult.No)
+                {
+                    SavePDF_Std();
+                }
+            }
+        }
+
+        // CSV保存 (Luminance Std)
+        private void SaveCSV_Std()
+        {
+            using (SaveFileDialog saveDialog = new SaveFileDialog())
+            {
+                saveDialog.Title = "CSVとして保存";
+                saveDialog.Filter = "CSVファイル (*.csv)|*.csv";
+                saveDialog.FileName = "luminance_std_series.csv";
+
+                if (saveDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        using (StreamWriter writer = new StreamWriter(saveDialog.FileName, false, Encoding.UTF8))
+                        {
+                            // ヘッダー作成: Angle(deg), Series1, Series2, ...
+                            var headers = new List<string> { "Angle(deg)" };
+                            headers.AddRange(dataSeriesDict_lumStd.Keys);
+                            writer.WriteLine(string.Join(",", headers));
+
+                            // 全ての系列から全てのAngle（X値）を収集してソート
+                            var allAngles = new SortedSet<double>();
+                            foreach (var seriesValues in dataSeriesDict_lumStd.Values)
+                            {
+                                foreach (var point in seriesValues)
+                                {
+                                    allAngles.Add(point.X);
+                                }
+                            }
+
+                            // 各Angleごとに行を作成
+                            foreach (double angle in allAngles)
+                            {
+                                var row = new List<string> { angle.ToString("F2") };
+
+                                foreach (var seriesName in dataSeriesDict_lumStd.Keys)
+                                {
+                                    var seriesValues = dataSeriesDict_lumStd[seriesName];
+                                    // そのAngleに対応するデータがあるか探す
+                                    var point = seriesValues.FirstOrDefault(p => Math.Abs(p.X - angle) < 0.001);
+                                    
+                                    if (point != null)
+                                    {
+                                        row.Add(point.Y.ToString("F4"));
+                                    }
+                                    else
+                                    {
+                                        row.Add(""); // データなし
+                                    }
+                                }
+                                writer.WriteLine(string.Join(",", row));
+                            }
+                        }
+                        MessageBox.Show("CSVファイルとして保存しました。", "保存完了");
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("CSV保存中にエラーが発生しました: " + ex.Message, "エラー");
+                    }
+                }
+            }
+        }
+
+        // PDF保存 (Luminance Std)
+        private void SavePDF_Std()
+        {
+            using (SaveFileDialog saveDialog = new SaveFileDialog())
+            {
+                saveDialog.Title = "PDFとして保存";
+                saveDialog.Filter = "PDFファイル (*.pdf)|*.pdf";
+                saveDialog.FileName = "luminance_std_chart.pdf";
+
+                if (saveDialog.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        // 1. グラフをBitmapに描画
+                        Bitmap bmp = new Bitmap(Luminance_std.Width, Luminance_std.Height);
+                        Luminance_std.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+
+                        // 2. PDFドキュメント作成
+                        var document = new PdfSharp.Pdf.PdfDocument();
+                        var page = document.AddPage();
+                        page.Size = PdfSharp.PageSize.A4;
+                        page.Orientation = PdfSharp.PageOrientation.Landscape;
+
+                        // 3. 描画用グラフィックス取得
+                        var gfx = XGraphics.FromPdfPage(page);
+
+                        // 4. Bitmap → XImage に変換
+                        using (var stream = new MemoryStream())
+                        {
+                            bmp.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+                            stream.Position = 0;
+
+                            XImage img = XImage.FromStream(stream);
+
+                            // 5. 画像を中央に配置して描画
+                            double x = (page.Width - img.PixelWidth * 72 / img.HorizontalResolution) / 2;
+                            double y = (page.Height - img.PixelHeight * 72 / img.VerticalResolution) / 2;
+
+                            gfx.DrawImage(img, x, y,
+                                img.PixelWidth * 72 / img.HorizontalResolution,
+                                img.PixelHeight * 72 / img.VerticalResolution);
+                        }
+
+                        // 6. 保存
+                        document.Save(saveDialog.FileName);
+                        MessageBox.Show("PDFファイルとして保存しました。", "保存完了");
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show("PDF保存中にエラーが発生しました: " + ex.Message, "エラー");
+                    }
+                }
+            }
+        }
+
+        // ---------------------------------------
+        //               その他機能
+        // ---------------------------------------
+        // Eyetracking 測定機能ON/OFF
+        private void Eyetracking_Click(object sender, EventArgs e)
+        {
+            if (EyeTrack == false)
+            {
+                EyeTrack = true;
+                Eyetracking.BackgroundImage = Properties.Resources.EyetrackingOFF;
+            }
+            else
+            {
+                EyeTrack = false;
+                Eyetracking.BackgroundImage = Properties.Resources.EyetrackingON;
+            }
+        }
+        // カメラ移動方向指定ボタン
+        // 水平
+        private void CameraMove_H_Click(object sender, EventArgs e)
+        {
+            if (Horizontal == false)
+            {
+                Horizontal = true;
+                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingON_Horizontal;
+                Depth = false;
+                CameraMove_D.BackgroundImage = Properties.Resources.CameraTrackingOFF_Depth;
+            }
+            else
+            {
+                Horizontal = false;
+                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Horizontal;
+            }
+        }
+        // 奥行
+        private void CameraMove_D_Click(object sender, EventArgs e)
+        {
+            if (Depth == false)
+            {
+                Depth = true;
+                CameraMove_D.BackgroundImage = Properties.Resources.CameraTrackingON_Depth;
+                Horizontal = false;
+                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Horizontal;
+            }
+            else
+            {
+                Depth = false;
+                CameraMove_H.BackgroundImage = Properties.Resources.CameraTrackingOFF_Depth;
             }
         }
     }

@@ -497,6 +497,7 @@
             this.ErrRange.Size = new System.Drawing.Size(208, 27);
             this.ErrRange.TabIndex = 41;
             this.ErrRange.TabStop = false;
+            this.ErrRange.SelectedIndexChanged += new System.EventHandler(this.ErrRange_SelectedIndexChanged);
             // 
             // Luminance_std
             // 
@@ -593,6 +594,7 @@
             this.LumStd_Start.TabIndex = 48;
             this.LumStd_Start.Text = "STD(θ)";
             this.LumStd_Start.UseVisualStyleBackColor = true;
+            this.LumStd_Start.Click += new System.EventHandler(this.LumStd_Start_Click);
             // 
             // CrosstalkEvaluation
             // 

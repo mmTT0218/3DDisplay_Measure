@@ -1393,9 +1393,9 @@ namespace CTMeasure
                     double stdVal = CalculateLuminanceStd(roiMat);
                     values.Add(new LiveCharts.Defaults.ObservablePoint(currentAngle, stdVal));
 
-                    // (Optional) 確認用表示
-                    Cv2.ImShow("StdDev ROI", roiMat);
-                    Cv2.WaitKey(1);
+                    // (Optional) 確認用表示 -> 停止する可能性があるためコメントアウト
+                    // Cv2.ImShow("StdDev ROI", roiMat);
+                    // Cv2.WaitKey(1);
                 }
 
                 MessageBox.Show($"測定完了しました。\n保存先: {saveDir}", "完了");

@@ -1322,8 +1322,13 @@ namespace CTMeasure
                 double maxAngle = Luminance_std.AxisX[0].MaxValue;
                 
                 double stepDeg = 1.0;
-                string stepText = ErrStep.Text;
-                if (!double.TryParse(stepText, out stepDeg)) stepDeg = 1.0;
+                string stepText = ErrStep.Text.Replace("°", "").Replace("deg", "").Trim();
+                if (!double.TryParse(stepText, out stepDeg))
+                {
+                     // パース失敗時は警告を出してデフォルトへ (サイレント失敗防止)
+                     MessageBox.Show($"Step値の解析に失敗しました: {ErrStep.Text}\nデフォルト値(1.0)を使用します。", "警告");
+                     stepDeg = 1.0;
+                }
                 if (stepDeg <= 0) stepDeg = 1.0;
 
                 // ループ回数
